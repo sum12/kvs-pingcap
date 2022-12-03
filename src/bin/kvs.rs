@@ -2,7 +2,7 @@ use clap::Parser;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author(clap::crate_authors!("\n")), version, about, long_about = clap::crate_description!())]
 struct Args {
     /// Action
     #[command(subcommand)]
@@ -49,6 +49,4 @@ fn main() -> Result<(), u8> {
         Action::Set(SetArgs { .. }) => panic!("unimplemented"),
         Action::Rm(RemoveArgs { .. }) => panic!("unimplemented"),
     }
-
-    Ok(())
 }
