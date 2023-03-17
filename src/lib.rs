@@ -20,6 +20,8 @@ use failure::Fail;
 use serde::Deserialize;
 use serde::Serialize;
 use std::io::BufRead;
+use std::io::Seek;
+use std::io::SeekFrom;
 use std::io::Write;
 use std::path::Path;
 
@@ -35,6 +37,22 @@ pub enum Errors {
     KeyNotFound,
     #[fail(display = "Unable to read log file")]
     LogCorrupted,
+    #[fail(display = "{}", _0)]
+    IOError(#[cause] std::io::Error),
+    #[fail(display = "{}", _0)]
+    Serde(#[cause] serde_json::Error),
+}
+
+impl From<serde_json::Error> for Errors {
+    fn from(cause: serde_json::Error) -> Self {
+        Errors::Serde(cause)
+    }
+}
+
+impl From<std::io::Error> for Errors {
+    fn from(cause: std::io::Error) -> Self {
+        Errors::IOError(cause)
+    }
 }
 
 pub type Result<X> = std::result::Result<X, Errors>;
@@ -46,10 +64,12 @@ pub struct KvStore<'a> {
 
 impl<'a> KvStore<'a> {
     pub fn open(path: &'a Path) -> Result<Self> {
-        Ok(KvStore {
+        let mut store = KvStore {
             log: vec![],
             dir: path,
-        })
+        };
+        store.refill_log()?;
+        Ok(store)
     }
 
     fn refill_log(&mut self) -> Result<()> {
@@ -76,8 +96,14 @@ impl<'a> KvStore<'a> {
     ///
     /// any pre-existing values for the key will be overwritten
     pub fn set(&mut self, k: String, v: String) -> Result<()> {
-        //         self.refill_log()?;
         let op = Operation::Set(k, v);
+        let mut f = std::fs::File::options()
+            .append(true)
+            .create(true)
+            .open(self.dir.join("kvs.log"))?;
+        f.seek(SeekFrom::End(0))?;
+        serde_json::to_writer(&f, &op)?;
+        f.write("\n".as_bytes())?;
         self.log.push(op);
         Ok(())
     }
@@ -86,7 +112,6 @@ impl<'a> KvStore<'a> {
     ///
     /// returns `None` if key is not present
     pub fn get(&mut self, k: String) -> Result<Option<String>> {
-        self.refill_log()?;
         let opr: Vec<&Operation> = self
             .log
             .iter()
@@ -105,26 +130,18 @@ impl<'a> KvStore<'a> {
     /// Remove the given key from the store
     pub fn remove(&mut self, k: String) -> Result<()> {
         if let Ok(Some(_)) = self.get(k.clone()) {
-            self.log.push(Operation::Rm(k));
+            let op = Operation::Rm(k);
+            let mut f = std::fs::File::options()
+                .append(true)
+                .create(true)
+                .open(self.dir.join("kvs.log"))?;
+            f.seek(SeekFrom::End(0))?;
+            serde_json::to_writer(&f, &op)?;
+            f.write("\n".as_bytes())?;
+            self.log.push(op);
             Ok(())
         } else {
             Err(Errors::KeyNotFound)
         }
-    }
-}
-
-impl<'a> Drop for KvStore<'a> {
-    fn drop(&mut self) {
-        let file = std::fs::File::options()
-            .append(true)
-            .create(true)
-            .open(self.dir.join("kvs.log"))
-            .unwrap();
-        let mut fh = std::io::BufWriter::new(file);
-
-        let _ = self.log.iter().for_each(|log| {
-            fh.write(serde_json::to_string(log).unwrap().as_bytes());
-            fh.write("\n".as_bytes());
-        });
     }
 }
