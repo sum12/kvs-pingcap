@@ -42,11 +42,31 @@ struct RemoveArgs {
     #[arg()]
     key: String,
 }
-fn main() -> Result<(), u8> {
+fn main() -> Result<(), failure::Error> {
     let args = Args::parse();
+    let path = std::path::Path::new("./");
+    let mut kv = kvs::KvStore::open(&path)?;
     match args.action {
-        Action::Get(GetArgs { .. }) => panic!("unimplemented"),
-        Action::Set(SetArgs { .. }) => panic!("unimplemented"),
-        Action::Rm(RemoveArgs { .. }) => panic!("unimplemented"),
-    }
+        //         Action::Get(GetArgs { key }) => kv.get(key)?.and_then(|value| println!("{}", value)),
+        Action::Get(GetArgs { key }) => {
+            //             kv.get(key)?.and_then(|value| {
+            //                 println!("{}", value);
+            //                 Some(())
+            //             });
+
+            match kv.get(key)? {
+                Some(value) => println!("{}", value),
+                None => println!("Key not found"),
+            };
+        }
+        Action::Set(SetArgs { key, value }) => kv.set(key, value)?,
+        Action::Rm(RemoveArgs { key }) => match kv.remove(key) {
+            Err(_) => {
+                println!("Key not found");
+                std::process::exit(1);
+            }
+            _ => {}
+        },
+    };
+    Ok(())
 }
